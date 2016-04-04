@@ -1,0 +1,221 @@
+---
+title: "Chartbook of Oregon Hospitals 2006-2014"
+author: "Dave Straube"
+date: "April 4, 2016"
+output: pdf_document
+toc: true
+toc_depth: 2
+---
+\newpage
+
+# Overview
+
+This document presents a visualization of Oregon hospital trends from 2006 through 2014
+based on publicly available data provided by the 
+[Oregon Health Authority](https://www.oregon.gov/oha/OHPR/RSCH/pages/hospital_reporting.aspx). Hospitals are
+classified as type A, B, or DRG with definitions as follows:
+
++  Type A hospitals are small - fewer than 50 beds - and are located **more than** 30 miles from another hospital.
+
++  Type B hospitals are small - fewer than 50 beds - and are located **within** 30 miles of another hospital.
+
++ Type DRG hospitals are typically large, urban hospitals that receive payments based on the
+[Diagnosis Related Group](https://www.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/MedicareFeeforSvcPartsAB/downloads/DRGdesc08.pdf) (DRG) system as defined by the 
+[Centers for Medicaid and Medicare Services](https://www.cms.gov) (CMS).
+
+This section provides an overview of Oregon hospitals en masse with subsequent sections examining hospitals individually.
+
+```{R, echo = FALSE}
+suppressMessages(suppressWarnings(source("./chartbook.R")))
+```
+
+Charity care and bad debt as percentages of Gross Patient Revenue (GPR) decreased noticeably in 2013. 
+The first plot examines this trend by hospital type. The pink 
+vertical column represents the recent _Great Recession_ as per the
+[St. Louis Federal Reserve Bank](https://research.stlouisfed.org/fred2/help-faq/) and the black vertical line represents the
+ACA's enactment date of 3/23/2010. Bad debt and charity care are identified by color with their sum representing total
+uncompensated care. The plots show that both bad debt and charity care dropped in 2013 for all types of hospitals
+with bad debt falling more steeply. Pre-2013 the total uncompensated care contour seems to be defined mostly
+by the charity care contour with bad debt a near constant percentage.
+
+```{R, echo = FALSE, fig.width = 7, fig.height = 5.5}
+pl.uc.median.as.pct.of.gpr
+```
+
+\newpage
+The next plot shows how operating margins (dashed line) and total margins (solid line) have changed over time. As before,
+we plot median values by type of hospital. We note that total margins are consistently larger than operating margins but that there is no common post-ACA trend
+for all hospital types. The simplistic reason why total margins are consistently higher than operating margins is that
+total margins include net non-operating revenue (investments and tax revenues as per the definitions at the end of
+this document) while operating margins do not.
+
+```{R, echo = FALSE, fig.width = 7, fig.height = 7}
+pl.median.margins
+```
+
+\newpage
+The next plot is intended to show how much hospital income comes from non-operating sources and
+to highlight the relative revenue sizes among hospital types.
+Recall that `Net Income` is the sum of `Operating Income` and `Net Non-operating Revenue` where the latter is defined as "investments and tax revenue." Either
+component can be negative in a given year. When both components are positive or both components negative, then their stacked
+values in the plot represent their sum, i.e. net income. When only one component is negative, then net income is not
+directly shown by the plot and instead would be the sum of the negative and positive components. Whichever component is
+larger determines whether net income was positive or negative for the year.
+
+```{R, echo = FALSE, fig.width = 7, fig.height = 7}
+suppressWarnings(print(pl.median.net.income))
+```
+
+The plot shows that some
+type A hospitals generate a significant portion of their net income from nonoperating revenue.
+Post-ACA non-operating revenue seems to be a fairly constant percentage for DRG hospitals, but still averaging 15% or higher.
+Lastly, in the post-ACA timeframe net income has been dropping for type A hospitals, fluctuated for type B hospitals,
+and grown for type DRG hospitals. Lacking annual patient counts one can not say how much the DRG gain is due to pricing 
+versus volume.
+
+\newpage
+The next plot is a [box and whisker diagram](https://en.wikipedia.org/wiki/Box_plot) 
+which shows the range of uncompensated care as a percentage of gross patient revenue for non-profit DRG hospitals only.
+The top and bottom of each box represents the 75th and 25th percentile respectively and the bisecting line represents
+the 50th percentile. Vertical lines and dots above and below a box represent outliers. Data for the two for-profit hospitals in the state is superimposed on the boxplot as points.
+
+The plots show that for-profits do not escape bad debt burden. This makes sense intuitively as bad debt is more a function of the economy as opposed to how a hospital is managed. Charity care is a different story with for-profits consistently on the low outlier end of the scale.
+
+```{R, echo = FALSE, fig.width = 7, fig.height = 8}
+pl.drg.uc
+```
+
+\newpage
+This final plot is a box and whisker diagram of hospital margins for non-profit DRG hospitals only. Data for
+the two for-profit hospitals in the state is superimposed on the boxplot as points.
+
+```{R, echo = FALSE, fig.width = 7, fig.height = 8}
+pl.drg.margin
+```
+\newpage
+
+# Survey by Hospital
+
+This section presents hospitals individually in alphabetical order. Note that hospital names in the table of contents
+on page 1 are links which can be used to jump to a specific hospital quickly.
+
+Each hospital is summarized with three plots:
+
+1. A bar chart of net income by year where net income is the sum of operating income and net non-operating revenue.
+Either
+component can be negative in a given year. When both components are positive or both components negative, then their stacked
+values in the plot represent their sum, i.e. net income. When only one component is negative, then net income is not
+directly shown by the plot and instead would be the sum of the negative and positive components. Whichever component is
+larger determines whether net income was positive or negative for the year.
+
+2. Operating margins and total margins superimposed on a boxplot of margins for all hospitals of the same
+type - A, B, or DRG. Data points are connected by a **joinpoint** line. Unlike a linear model which fits a single
+straight line to the data points, a joinpoint line has multiple segments which reflect statistically significant
+changes in the slope of data points. The
+[NIH National Cancer Institute](http://surveillance.cancer.gov/joinpoint/) populairized the use of joinpoint analysis
+for analyzing cancer trends. We use the R
+[segmented](https://www.researchgate.net/publication/234092680_Segmented_An_R_Package_to_Fit_Regression_Models_With_Broken-Line_Relationships)
+package written by Vito M. R. Muggeo.
+
+3. Charity care, bad debt and total uncompensated care are superimposed on a boxplot of values for all hospitals
+of the same type - A, B, or DRG. Data points are connected by a joinpoint line.
+
+```{R child = "perhosp.Rmd"}
+```
+\newpage
+
+# Hospital System Overview
+
+Some hospitals are members of a larger hospital system as follows:
+
+```{R, echo = FALSE}
+list.systems()
+```
+
+The following plots offer comparisons between hospital systems. We limit the analysis to larger hospital systems 
+(4 hospitals or more) in order to reduce plot complexity. For comparison purposes DRG median values are included
+as more than half of the hospitals represented are type DRG. All lines are joinpoint lines.
+
+\newpage
+```{R, echo = FALSE, fig.width = 7, fig.height = 10}
+pl.median.uc.by.syst
+```
+
+\newpage
+```{R, echo = FALSE, fig.width = 7, fig.height = 10}
+pl.median.margins.by.syst
+```
+
+\newpage
+
+# Survey by Hospital System
+
+This section compares performance of hospitals within a larger hospital system. For each system we plot the
+actual individual member hospital performance against the median of all hospitals in the system.
+
+```{R child = "persyst.Rmd"}
+```
+
+# Data Provenance
+
+Annual Excel format files for 2006 through 2014 
+were downloaded from the Oregon Health Authority [here](https://www.oregon.gov/oha/OHPR/RSCH/pages/hospital_reporting.aspx).
+A new sheet was created in each file which contained a copy of the original data but with common column names.
+This new sheet was exported
+in CSV format and then read into R where all subsequent cleaning and analysis was performed. Several issues were noted
+and remedied as follows:
+
+* Inconsistent hospital names - some due to ownership changes, others due to human variability. Cleaned data maps 
+all hospital names to their 2014 equivalent.
+
+* Inconsistent column names - remedied by hand in Excel.
+
+* Missing columns:
+
+    + `Other Operating Revenue` missing from early years was calculated as `Total Operating Revenue` minus
+`Net Patient Revenue`.
+
+    + Later years were missing `Charity Care`, `Bad Debt`, and `Total Uncompensated Care` as a percentage of
+`Gross Patient Revenue`. This was calculated for all years as the respective value divided by `Gross Patient Revenue`.
+
+    + Several years were missing the `Type` (A, B, or DRG) column. When missing, `Type` was assigned as the previous year's `Type`.
+
+* Year 2010 separated hospital financial data and uncompensated care into two sheets. This was manually combined when
+generating the sheet with common column names.
+
+* `Total Margin` was sometimes a calculated value and sometimes a hardcoded value. When calculated, different years
+used different formulas. As a result, all `Total Margin` data was ignored and a value calculated using
+`Net Income / (Total Operating Revenue + Net Non-Operating Revenue)`.
+
+Most of the data in the original spreadsheets was hardcoded despite the fact that certain columns clearly are derived 
+from others. This leaves room for both transcription and calculation error. We checked the data against the following 
+rules. The number in parenthesis following each rule identifies how many rows (of 514 total) failed the rule. Rules were
+devised based on definitions provided in the 2014 spreadsheet. Those definitions are appended to this document.
+
+* `Total Operating Revenue = Net Patient Revenue + Other Operating Revenue` (4)
+
+* `Operating Income = Total Operating Revenue - Total Operating Expenses` (4)
+
+* `Operating Margin = Operating Income / Total Operating Revenue` (3)
+
+* `Net Income = Operating Income + Net Non-operating Revenue` (3)
+
+* `Total Uncompensated Care = Charity Care + Bad Debt` (0)
+
+The section below titled _Data Errors_ provides full detail on these errors. These errors were not corrected
+as there is no basis for determining whether the error is due to faulty input data, improper calculation, or 
+result value transcription error.
+
+Lastly, the following rows were removed due to missing data in the original spreadsheets.
+
+```{R, echo = FALSE}
+print(incomp, row.names = FALSE)
+```
+
+## Data Errors
+
+This section lists data errors discovered during data cleaning.
+
+```{R, echo = FALSE}
+source("./getdata.R")
+```

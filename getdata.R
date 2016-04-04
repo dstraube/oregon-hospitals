@@ -1,3 +1,22 @@
+######################################################################
+## Copyright (C) 2016, Dave Straube, http://davestraube.com
+##     
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+## 
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+## 
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+## 02110-1301, USA
+######################################################################
+
 setwd("~/R/OurOregon")
 rm(list = ls())
 
@@ -24,6 +43,20 @@ hospital.names <- read.csv("./data/hospitals.csv",
 hospital.name.2014 <- function(current.name, year) {
     uid <- hospital.names[hospital.names$hospital == current.name & hospital.names$year == year, "uid"]
     hospital.names[hospital.names$year == 2014 & hospital.names$uid == uid, "hospital"]
+}
+
+
+# Figure out which hospitals are in multi-hospital systems and save as list of vectors of hospital names.
+syscounts <- group_by(hospital.names[hospital.names$year == 2014,], system) %>%
+    summarize(count = n()) %>%
+    as.data.frame()
+hosp.sys <- list()
+for ( syst in subset(syscounts, system != "Independent" & count > 1)$system ) {
+    v <- character(0)
+    for ( hosp in subset(hospital.names, year == 2014 & system == syst)$hospital ) {
+        v <- append(v, hosp)
+    }
+    hosp.sys[[syst]] <- v
 }
 
 first.year <- 2006
@@ -102,23 +135,9 @@ hosp.data$tot.margin <- hosp.data$net.income / (hosp.data$tot.op.rev + hosp.data
 #     3   - op.margin = op.income / tot.op.rev
 #     4   - net.income = op.income + net.non.op.rev
 #     5   - tot.uncomp.care = charity.care + bad.debt
-#
-# Rules are allowed some slack for sigificant digit truncation.
-
-close.enough <- function(expected, offered, permissible.pct.error) {
-    lopct <- (100 - permissible.pct.error) / 100
-    hipct <- (100 + permissible.pct.error) / 100
-    if ( sign(expected) == sign(offered) ) {
-        expected <- abs(expected)
-        offered <- abs(offered)
-        if ( (offered >= (lopct * expected)) && (offered <= (hipct * expected)) ) {
-            return(TRUE)
-        }
-    }
-    FALSE
-}
 
 # In this next section we define a function to test each rule, run it against the data, and print out failures.
+# Use close.enough() function to allow for rounding and similar during data transcription at OHA.
 
 pass.rule.1 <- function(row, permissible.pct.error) {
     # Kaiser Sunnyside has no npr or gpr data for 2012, 2013, 2014.
@@ -217,15 +236,13 @@ permissible.pct.error <- 1
 for ( row in seq(dim(hosp.data)[1]) ) {
     if ( !pass.rule.5(hosp.data[row,], permissible.pct.error) ) { errs5 <- errs5 + 1 }
 }
-
-# No rule 5 errors!
          
 cat(paste0('\n', dim(hosp.data)[1], " hospital-years tested\n",
            '\t', errs1, " rule 1 errors\n",
            '\t', errs2, " rule 2 errors\n",
            '\t', errs3, " rule 3 errors\n",
            '\t', errs4, " rule 4 errors\n",
-           '\t', errs5, " rule 6 errors\n"))
+           '\t', errs5, " rule 5 errors\n"))
 
 # Final sanity check.
 if ( sum(complete.cases(hosp.data)) > 0 ) {
@@ -233,7 +250,7 @@ if ( sum(complete.cases(hosp.data)) > 0 ) {
     print(hosp.data[!complete.cases(hosp.data),])
 }
 
-save(hosp.data, file = "./hospitals.RData")
+save(hosp.data, hosp.sys, file = "./hospitals.RData")
 
 
 
