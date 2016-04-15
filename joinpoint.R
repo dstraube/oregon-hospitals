@@ -19,20 +19,26 @@
 
 library(segmented)
 
+JP_DEBUG <- FALSE
+
 # Define a function to perform joinpoint operation using the segmented package.
-# Returns a vector of y values representing the joinpoint line.
-
 # See: http://surveillance.cancer.gov/joinpoint/
-# See: https://cran.r-project.org/web/packages/JPSurv/index.html
 # See: https://www.researchgate.net/publication/234092680_Segmented_An_R_Package_to_Fit_Regression_Models_With_Broken-Line_Relationships
-#
-# Would like to have used JPSurv::joinpoint() but it is specific to population-based cancer survival analysis
-# and expects input data to include columns for number of people at risk, number who died, etc. Instead use
-# segmented::segmented() which seems to do the same job for simple y = f(x) data.
 
-joinpoint <- function(x, y, msg_id, max.inflection.points = NULL, verbose = FALSE) {
+# This function returns a list which always has the following elements:
+#       $x       - x values for best fit line points
+#       $y       - y values for best fit line points
+#       $fit     - either an lm object or segmented object which represents the best/first fit found
+#       $allfits - a list of lists whose elements are $fit, $x, and $y of all fits found which can be
+#                  referenced by [[i]] where i correlates to $df$ifit
+#       $df      - a data frame summarizing all the fits in $allfits
 
-    if ( verbose ) { cat(paste0("joinpoint(", msg_id, ")\n")) }
+joinpoint <- function(x, y,                        # vectors of x and y values
+                      exit_rule = "first_fit",     # one of c("first_fit", "best_fit")
+                      max_joinpoints = 10,         # maximum number of joinpoints to (attempt to) find
+                      points_between = 10) {       # number of points to interpolate between values of x
+    
+    stopifnot(exit_rule %in% c("first_fit", "best_fit"))
     
     # Call to segmented::segmented() may succeed both with and without warnings, or fail with exceptions.
     # A typical exception is when too many inflection points are defined, such as:
@@ -59,107 +65,169 @@ joinpoint <- function(x, y, msg_id, max.inflection.points = NULL, verbose = FALS
     # points in the input. Fake it out by adding points on a straight line between existing points.
     # Relationship of gaps to number of points insures interpolated line has points at all the
     # original locations.
-    
-    thisx <- NULL
-    interpolate <- function(x, y, points_between) {
         
-        if ( 0 == points_between ) {
-            thisx <<- x
-            list(x = x, y = y)
-        } else {
-            npts <- length(x)
-            ngaps <- npts - 1
-            retval <- approx(x, y, method = "linear", n = (ngaps * points_between) + npts)
-            if ( verbose ) { cat(paste0("\tinterpolate(nx = ", length(retval$x), " , ny = ", length(retval$y), ")\n")) }
-            thisx <<- retval$x
-            retval
-        }
+    if ( 0 == points_between ) {
+        interpolated_xylist <- list(x = x, y = y)
+    } else {
+        npts <- length(x)
+        ngaps <- npts - 1
+        interpolated_xylist <- approx(x, y, method = "linear", n = (ngaps * points_between) + npts)
     }
-
-    # We want to automatically find the maximum number of statistically significant inflection points so 
-    # iteratively try with successively shrinking sets of starter inflection points which segmented::segmented()
-    # requires. Set max/starting number of inflection points to 1/4 of total points otherwise resulting model
-    # will just follow the original line almost point by point - as well as generate errors. N.B. - This works
-    # OK for the expected initial application of Oregon Health Authority hospital reports where 2009 <= x <= 2014
-    # but may be ill-advised for larger ranges of x.
+    
+    # We want to automatically find the maximum number of statistically significant inflection points so iteratively
+    # try with successively shrinking sets of starter inflection points which segmented::segmented() requires.
     
     xmin <- min(x)
     xmax <- max(x) 
-    make_psi <- function(num.inflection.points) {
+    make_psi <- function(num_joinpoints) {
         
-        if ( 1 == num.inflection.points ) { return(median(c(xmin, xmax))) }
-        delta = (xmax - xmin) / num.inflection.points
-        retval <- seq(xmin + delta, xmax - delta, delta)
-        if ( verbose ) { cat(paste0("\tpsi length = ", length(retval), "\n")) }
-        retval
-    }
-    
-    initial.inflection.points <- max.inflection.points
-    if ( is.null(initial.inflection.points) ) {
-        initial.inflection.points <- floor(length(x) / 4)
-    }
-    
-    # Retry with successively smaller number of inflection points. And wrap that in
-    # retries with successively more dense interpolation.
-    
-    for ( points_between in c(0, 4, 8, 12) ) {
-        xylist <- interpolate(x, y, points_between)
-        num.inflection.points <- initial.inflection.points
-        fit.seg <- NULL
-        while ( is.null(fit.seg) & num.inflection.points > 0 ) {
-            fit.lm <- lm(y ~ x, xylist)
-            fit.seg <- my_segmented(fit.lm, make_psi(num.inflection.points))
-            num.inflection.points <- num.inflection.points - 1
-        }
-        if ( !is.null(fit.seg) ) {
-            break
+        if ( 1 == num_joinpoints ) { 
+            median(c(xmin, xmax))
+        } else {
+            delta <- (xmax - xmin) / (num_joinpoints + 1)
+            seq(xmin + delta, xmax - delta, delta)
         }
     }
     
-    if ( is.null(fit.seg) ) {
-        message(paste0("joinpoint(", msg_id, ") - no segmented fit possible, returning lm line."))
-        retval <- fitted(lm(y ~ x, data.frame(x = x, y = y)))
+    # Retry with successively smaller number of inflection points.
+    
+    fit.lm <- lm(y ~ x, interpolated_xylist)
+    allfits <- list()
+    df <- NULL
+    ifit <- 1
+    for ( num_joinpoints in seq(max_joinpoints, 0, -1) ) {
+
+        if ( 0 == num_joinpoints ) {
+            thisfit <- fit.lm
+            thisx <- x
+            thisy <- predict(fit.lm, data.frame(x = x))
+        } else {
+            thisfit <- my_segmented(fit.lm, psi = make_psi(num_joinpoints))
+            if ( !is.null(thisfit) ) {
+                thisx <- c(xmin, thisfit$psi[, "Est."], xmax)
+                thisy <- predict(thisfit, data.frame(x = thisx))
+            }
+        }
+        if ( !is.null(thisfit) ) {
+            allfits[[ifit]] <- list(fit = thisfit, x = thisx, y = thisy)
+            df <- rbind(df,
+                        data.frame(ifit = ifit,
+                                   interpolation = points_between,
+                                   numjp = num_joinpoints,
+                                   BIC = BIC(thisfit)))
+            ifit <- ifit + 1
+            if ( "first_fit" == exit_rule ) {
+                break
+            }
+        }    
+    }
+    
+    ifit <- NULL
+    if ( "best_fit" == exit_rule && dim(df)[1] > 1 ) {
+
+        # Pick "best" fit. General dilemma is that fits with low joinpoint count may not show all relevant
+        # segments while fits with high joinpoint count overfit the data. We use the simpler of the NIH
+        # National Cancer Institute methods based on the Bayesian Information Criterion (BIC). See:
+        #       http://surveillance.cancer.gov/joinpoint/faq/final_model.html
+        #       http://surveillance.cancer.gov/joinpoint/Joinpoint_Help_4.2.0.0.pdf
+        # The BIC generally decreases as the number of joinpoints increases and empirical testing has shown
+        # that it takes a deep nosedive at the ideal fit when looking at fits in increasing
+        # joinpoint order. (Though it may rise again later when into the overfitting range.)
+        # So we calculate change in BIC and look for the first delta bigger than -50%.
+        
+        # Add BIC_delta to df where BIC_delta is percent change in BIC from prior fit with less joinpoints.
+        df <- df[order(df$numjp),]
+        num_rows <- dim(df)[1]
+        new <- df$BIC[2:num_rows]
+        old <- df$BIC[1:(num_rows-1)]
+        df$BIC_delta <- c(0, ((new - old) / abs(old)))
+        
+        # Find ifit value at the dropoff.
+        for ( i in df$ifit ) {
+            this_delta <- df[df$ifit == i,][, "BIC_delta"]
+            if ( -1 == sign(this_delta) && abs(this_delta) > 0.5 ) {
+                ifit <- i
+                if ( JP_DEBUG ) { message(paste("best ifit =", ifit)) }
+                break
+            }
+        }
+        if ( is.null(ifit) ) {
+            # No best fit found using BIC_delta methodology. Assume caller passed in a reality-based max_joinpoints
+            # value. In this case, last row in df will be closest to their expected joinpoint count.
+            ifit <- df[dim(df)[1], "ifit"]
+            if ( JP_DEBUG ) { message(paste("no best fit ifit =", ifit)) }
+        }
     } else {
-        # Verify that interpolated line includes the exact same points as original x argument.
-        stopifnot(length(x) == sum(x %in% thisx))
-        retval <- fitted(fit.seg)[match(x, thisx)]
+        # "first_fit" case or df had length 1.
+        ifit <- df[1, "ifit"]
+        if ( JP_DEBUG ) { message(paste("first fit or only fit ifit =", ifit)) }
     }
-    retval
+    if ( JP_DEBUG ) { print(df) }
+    
+    # Construct return value.
+    list(fit = allfits[[ifit]]$fit,
+         x = allfits[[ifit]]$x,
+         y = allfits[[ifit]]$y,
+         allfits = allfits,
+         df = df)
 }
 
 joinpoint.unit.test <- function() {
-    # Set up plot panel.
-    par(mfrow = c(2, 2))
     
+    debug_save <- JP_DEBUG
+    JP_DEBUG <<- TRUE
+    
+    dlist <- list()
     # Flat line with non-statistically-significant blip.
-    d0 <- data.frame(x = seq(100), y = c(seq(1, 50), 45, seq(52, 100)))
-    plot(d0$x, d0$y)
-    d0.lm <- lm(y ~ x, data = d0)
-    lines(d0$x, fitted(d0.lm))
-    lines(d0$x, joinpoint(d0$x, d0$y, "1 segment", verbose = TRUE), col = "red", lwd = 3)
-    
+    dlist[[1]] <- data.frame(x = seq(100), y = c(seq(1, 50), 45, seq(52, 100)))
     # Single inflection point test case.
-    d1 <- data.frame(x = seq(30), y = c(rep(1, 15), seq(1, 15)))
-    plot(d1$x, d1$y)
-    d1.lm <- lm(y ~ x, data = d1)
-    lines(d1$x, fitted(d1.lm))
-    lines(d1$x, joinpoint(d1$x, d1$y, "2 segment", verbose = TRUE), col = "red", lwd = 3)
-    
+    dlist[[2]] <- data.frame(x = seq(30), y = c(rep(1, 15), seq(1, 15)))
     # Double inflection point test case.
-    d2 <- data.frame(x = seq(30), y = c(rep(1, 10), seq(1, 10), rep(10, 10)))
-    plot(d2$x, d2$y)
-    d2.lm <- lm(y ~ x, data = d2)
-    lines(d2$x, fitted(d2.lm))
-    lines(d2$x, joinpoint(d2$x, d2$y, "3 segment", verbose = TRUE), col = "red", lwd = 3)
-    
+    dlist[[3]] <- data.frame(x = seq(30), y = c(rep(1, 10), seq(1, 10), rep(10, 10)))
     # Triple inflection point test case.
-    d3 <- data.frame(x=seq(100), y = c(seq(25), seq(25, 1, -1), seq(25), seq(25, 1, -1)))
-    plot(d3$x, d3$y)
-    d3.lm = lm(y ~ x, data = d3)
-    lines(d3$x, fitted(d3.lm))
-    lines(d3$x, joinpoint(d3$x, d3$y, "4 segment", verbose = TRUE), col = "red", lwd = 3)
+    dlist[[4]] <- data.frame(x=seq(100), y = c(seq(25), seq(25, 1, -1), seq(25), seq(25, 1, -1)))
+    
+    # Set up plot panel.
+    par(mfrow = c(5, 4))
+    
+    interp_cases <- c(0, 10, 20, 25)
+    for ( points_between in interp_cases ) {
+
+        jplist <- list()
+        for ( i in seq(4) ) {
+            
+            # Generate lm and joinpoint fits.
+            jplist[[i]] <- list()
+            jplist[[i]]$lm <- lm(y ~ x, data = dlist[[i]])
+            jplist[[i]]$jp <- joinpoint(dlist[[i]]$x, dlist[[i]]$y,
+                                        exit_rule = "best_fit",
+                                        points_between = points_between)
+            
+            # Print fitted lines in points_between == 10 case to prove that's the smart default.
+            # I.e. Top row of BIC_delta plots (points_between == 0) should show that first BIC_delta knee
+            # is at bad fit/numjp.
+            if ( points_between == interp_cases[2] ) {
+                # Plot original points in gray, lm line in black, joinpoint lines/points in red.
+                plot(dlist[[i]]$x, dlist[[i]]$y, col = "gray",
+                     main = paste0("Expect: ", i-1, "  Found: ", length(jplist[[i]]$jp$x)-2),
+                     xlab = "x data", ylab = "y data")
+                lines(dlist[[i]]$x, fitted(jplist[[i]]$lm), col = "black")
+                points(jplist[[i]]$jp$x, jplist[[i]]$jp$y, col = "red", pch = 23)
+                lines(jplist[[i]]$jp$x, jplist[[i]]$jp$y, col = "red", lwd = 3)
+            }
+        }
+        
+        for ( i in seq(4) ) {
+            # Plot BIC_delta versus numjp to prove BIC_delta algorithm makes sense.
+            plot(jplist[[i]]$jp$df$numjp, jplist[[i]]$jp$df$BIC_delta,
+                 main = paste("interp =", points_between),
+                 xlab = "numjp", ylab = "BIC_delta",
+                 xlim = c(0, 10))
+            lines(jplist[[i]]$jp$df$numjp, jplist[[i]]$jp$df$BIC_delta)
+        }
+    }
+    
+    JP_DEBUG <<- debug_save
 }
 
 #joinpoint.unit.test()
-
-

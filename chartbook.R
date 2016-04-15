@@ -24,7 +24,6 @@ suppressMessages(library(tidyr))
 suppressMessages(library(scales))
 suppressMessages(library(dplyr))
 suppressMessages(library(ggplot2))
-#suppressMessages(library(grid))
 suppressMessages(library(gridExtra))
 
 source("./utils.R", echo = FALSE)
@@ -33,10 +32,11 @@ source("./joinpoint.R", echo = FALSE)
 ###################################################################################################
 # Constants.
 ###################################################################################################
-# Process all hospitals or just a short subset.
-SHORT_VERSION <- FALSE
-# Initial inflection point estimate when generating joinpoint lines.
-JP_POINTS <- 3
+
+SHORT_VERSION <- FALSE       # Process all hospitals or just a short subset.
+JP_FIT <- "best_fit"         # Joinpoint fit method - "best_fit" or "first_fit".
+JP_MAX <- 2                  # Joinpoint inflection point upper bound and starting point.
+JP_BETWEEN <- 10             # Joinpoint interpolation count.
 
 ###################################################################################################
 # Load data, remove incomplete cases, define some common dates, normalize percentages.
@@ -363,26 +363,25 @@ hospital.margins <- function(h.name) {
     t.data <- hd[hd$type == h.type, c("year", "op.margin", "tot.margin")]
     boxdata <- rbind(data.frame(year = t.data$year, margin = t.data$op.margin, mtype = "Operating Margin"),
                      data.frame(year = t.data$year, margin = t.data$tot.margin, mtype = "Total Margin"))
-    boxdata$year <- factor(boxdata$year)
     # Point data.
     h.data <- hd[hd$hospital == h.name, c("year", "op.margin", "tot.margin")]
     pointdata <- rbind(data.frame(year = h.data$year, margin = h.data$op.margin, mtype = "Operating Margin"),
                        data.frame(year = h.data$year, margin = h.data$tot.margin, mtype = "Total Margin"))
-    pointdata$year <- factor(pointdata$year)
     # Line (joinpoint) data.
-    linedata <- rbind(data.frame(year = h.data$year,
-                                 jp = joinpoint(h.data$year, h.data$op.margin, h.name, JP_POINTS),
+    jp.op.margin <- joinpoint(h.data$year, h.data$op.margin, JP_FIT, JP_MAX, JP_BETWEEN)
+    jp.tot.margin <- joinpoint(h.data$year, h.data$tot.margin, JP_FIT, JP_MAX, JP_BETWEEN)
+    linedata <- rbind(data.frame(year = jp.op.margin$x,
+                                 jp = jp.op.margin$y,
                                  mtype = "Operating Margin"),
-                      data.frame(year = h.data$year,
-                                 jp = joinpoint(h.data$year, h.data$tot.margin, h.name, JP_POINTS),
+                      data.frame(year = jp.tot.margin$x,
+                                 jp = jp.tot.margin$y,
                                  mtype = "Total Margin"))
-    linedata$year <- factor(linedata$year)
     
     # Generate plot.
     pl <- ggplot() +
         geom_hline(yintercept = 0, size = 0.5) +
         geom_boxplot(data = boxdata,
-                     aes(x = year, y = margin)) +
+                     aes(x = year, y = margin, group = year)) +
         geom_point(data = pointdata,
                    size = 3, color = "red",
                    aes(x = year, y = margin)) +
@@ -391,7 +390,7 @@ hospital.margins <- function(h.name) {
                   aes(x = year, y = jp, group = mtype)) +
         facet_wrap( ~ mtype, ncol = 1) +
         scale_color_brewer(palette = "Set1") +
-        scale_x_discrete(breaks = seq(2006, 2014)) +
+        scale_x_continuous(breaks = seq(2006, 2014)) +
         scale_y_continuous(labels = pct0, breaks = seq(-100, 100, 5)) +
         ggtitle(paste0(h.name, " - Margins\n(Boxplot is for ", h.type, ")")) +
         labs(x = "Year", y = "Margin Percentage") +
@@ -421,29 +420,29 @@ hospital.uncompensated.care <- function(h.name) {
     boxdata <- rbind(data.frame(year = t.data$year, uc = t.data$bad.debt.pct, uctype = "Bad Debt"),
                      data.frame(year = t.data$year, uc = t.data$charity.care.pct, uctype = "Charity Care"),
                      data.frame(year = t.data$year, uc = t.data$uncomp.care.pct, uctype = "Total Uncompensated Care"))
-    boxdata$year <- factor(boxdata$year)
     # Point data.
     h.data <- hd[hd$hospital == h.name, c("year", "bad.debt.pct", "charity.care.pct", "uncomp.care.pct")]
     pointdata <- rbind(data.frame(year = h.data$year, uc = h.data$bad.debt.pct, uctype = "Bad Debt"),
                        data.frame(year = h.data$year, uc = h.data$charity.care.pct, uctype = "Charity Care"),
                        data.frame(year = h.data$year, uc = h.data$uncomp.care.pct, uctype = "Total Uncompensated Care"))
-    pointdata$year <- factor(pointdata$year)
     # Line (joinpoint) data.
-    linedata <- rbind(data.frame(year = h.data$year,
-                                 jp = joinpoint(h.data$year, h.data$bad.debt.pct, h.name, JP_POINTS),
+    jp.bad.debt <- joinpoint(h.data$year, h.data$bad.debt.pct, JP_FIT, JP_MAX, JP_BETWEEN)
+    jp.charity.care <- joinpoint(h.data$year, h.data$charity.care.pct, JP_FIT, JP_MAX, JP_BETWEEN)
+    jp.uncomp.care <- joinpoint(h.data$year, h.data$uncomp.care.pct, JP_FIT, JP_MAX, JP_BETWEEN)
+    linedata <- rbind(data.frame(year = jp.bad.debt$x,
+                                 jp = jp.bad.debt$y,
                                  uctype = "Bad Debt"),
-                      data.frame(year = h.data$year,
-                                 jp = joinpoint(h.data$year, h.data$charity.care.pct, h.name, JP_POINTS),
+                      data.frame(year = jp.charity.care$x,
+                                 jp = jp.charity.care$y,
                                  uctype = "Charity Care"),
-                      data.frame(year = h.data$year,
-                                 jp = joinpoint(h.data$year, h.data$uncomp.care.pct, h.name, JP_POINTS),
+                      data.frame(year = jp.uncomp.care$x,
+                                 jp = jp.uncomp.care$y,
                                  uctype = "Total Uncompensated Care"))
-    linedata$year <- factor(linedata$year)
     
     # Generate plot.
     pl <- ggplot() +
         geom_boxplot(data = boxdata,
-                     aes(x = year, y = uc)) +
+                     aes(x = year, y = uc, group = year)) +
         geom_point(data = pointdata,
                    size = 3, color = "red",
                    aes(x = year, y = uc)) +
@@ -452,7 +451,7 @@ hospital.uncompensated.care <- function(h.name) {
                   aes(x = year, y = jp, group = uctype)) +
         facet_wrap( ~ uctype, ncol = 1) +
         scale_color_brewer(palette = "Set1") +
-        scale_x_discrete(breaks = seq(2006, 2014)) +
+        scale_x_continuous(breaks = seq(2006, 2014)) +
         scale_y_continuous(labels = pct0, breaks = seq(0, 100, 2)) +
         ggtitle(paste0(h.name, " - Uncompensated Care as % of GPR\n(Boxplot is for ", h.type, ")")) +
         labs(x = "Year", y = "Uncompensated Care Percentage") +
@@ -558,12 +557,12 @@ for ( syst in names(hosp.sys) ) {
 }
 
 # Get joinpoint values.
-linedata <- group_by(pointdata, uctype, System) %>%
-    mutate(year = year, pct = joinpoint(year, pct, paste0(System, " - ", uctype), JP_POINTS)) %>%
-    as.data.frame()
+dofun <- function(grp) {
+    jp <- joinpoint(grp$year, grp$pct, JP_FIT, JP_MAX, JP_BETWEEN)
+    data.frame(year = jp$x, pct = jp$y)
+}
+linedata <- group_by(pointdata, uctype, System) %>% do(dofun(.))
 
-pointdata$year <- factor(pointdata$year)
-linedata$year <- factor(linedata$year)
 pl.median.uc.by.syst <- ggplot() +
     geom_point(data = pointdata,
                aes(x = year, y = pct, group = System, color = System, shape = System)) +
@@ -571,7 +570,7 @@ pl.median.uc.by.syst <- ggplot() +
               aes(x = year, y = pct, group = System, color = System, linetype = System)) +
     facet_wrap( ~ uctype, ncol = 1) +
     scale_color_brewer(palette = "Set1") +
-    scale_x_discrete(breaks = seq(2006, 2014)) +
+    scale_x_continuous(breaks = seq(2006, 2014)) +
     scale_y_continuous(labels = pct0, breaks = seq(0, 100, 2)) +
     labs(x = "Year", y = "Percentage of GPR") +
     ggtitle("Mean Uncompensated Care as Percentage\nof Gross Patient Revenue by Hospital System") +
@@ -604,12 +603,12 @@ for ( syst in names(hosp.sys) ) {
 }
 
 # Get joinpoint values.
-linedata <- group_by(pointdata, mtype, System) %>%
-    mutate(year = year, margin = joinpoint(year, margin, paste0(System, " - ", mtype), JP_POINTS)) %>%
-    as.data.frame()
+dofun <- function(grp) {
+    jp <- joinpoint(grp$year, grp$margin, JP_FIT, JP_MAX, JP_BETWEEN)
+    data.frame(year = jp$x, margin = jp$y)
+}
+linedata <- group_by(pointdata, mtype, System) %>% do(dofun(.))
 
-pointdata$year <- factor(pointdata$year)
-linedata$year <- factor(linedata$year)
 pl.median.margins.by.syst <- ggplot() +
     geom_point(data = pointdata,
                aes(x = year, y = margin, group = System, color = System, shape = System)) +
@@ -617,7 +616,7 @@ pl.median.margins.by.syst <- ggplot() +
               aes(x = year, y = margin, group = System, color = System, linetype = System)) +
     facet_wrap( ~ mtype, ncol = 1) +
     scale_color_brewer(palette = "Set1") +
-    scale_x_discrete(breaks = seq(2006, 2014)) +
+    scale_x_continuous(breaks = seq(2006, 2014)) +
     scale_y_continuous(labels = pct0, breaks = seq(-100, 100, 2)) +
     labs(x = "Year", y = "Margin as Percentage") +
     ggtitle("Margins by Hospital System") +
@@ -656,11 +655,11 @@ system.margins <- function(syst) {
     }
     
     # Get joinpoint values.
-    linedata <- group_by(pointdata, Hospital, mtype) %>%
-        mutate(pct = joinpoint(year, pct, Hospital, JP_POINTS)) %>%
-        as.data.frame()
-    pointdata$year <- factor(pointdata$year)
-    linedata$year <- factor(linedata$year)
+    dofun <- function(grp) {
+        jp <- joinpoint(grp$year, grp$pct, JP_FIT, JP_MAX, JP_BETWEEN)
+        data.frame(year = jp$x, pct = jp$y)
+    }
+    linedata <- group_by(pointdata, mtype, Hospital) %>% do(dofun(.))
     
     # Insure "Hospital System Mean" is always first/red element in legend and rest are alphabetical order.
     h.names <- c(hosp.sys[[syst]], "Hospital System Mean")
@@ -676,7 +675,7 @@ system.margins <- function(syst) {
         facet_wrap( ~ mtype, ncol = 1) +
         scale_shape_manual(values = seq(0, length(hosp.sys[[syst]]))) +
         scale_color_brewer(palette = "Set1") +
-        scale_x_discrete(breaks = seq(2006, 2014)) +
+        scale_x_continuous(breaks = seq(2006, 2014)) +
         scale_y_continuous(labels = pct0, breaks = seq(-100, 100, 2)) +
         labs(x = "Year", y = "Percent Margin") +
         ggtitle(paste0(syst," Hospital System\nMargin Percentage")) +
@@ -723,11 +722,11 @@ system.uncompensated.care <- function(syst) {
     }
     
     # Get joinpoint values.
-    linedata <- group_by(pointdata, Hospital, uctype) %>%
-        mutate(pct = joinpoint(year, pct, Hospital, JP_POINTS)) %>%
-        as.data.frame()
-    pointdata$year <- factor(pointdata$year)
-    linedata$year <- factor(linedata$year)
+    dofun <- function(grp) {
+        jp <- joinpoint(grp$year, grp$pct, JP_FIT, JP_MAX, JP_BETWEEN)
+        data.frame(year = jp$x, pct = jp$y)
+    }
+    linedata <- group_by(pointdata, uctype, Hospital) %>% do(dofun(.))
     
     # Insure "Hospital System Mean" is always first/red element in legend and rest are alphabetical order.
     h.names <- c(hosp.sys[[syst]], "Hospital System Mean")
@@ -743,7 +742,7 @@ system.uncompensated.care <- function(syst) {
         facet_wrap( ~ uctype, ncol = 1) +
         scale_shape_manual(values = seq(0, length(hosp.sys[[syst]]))) +
         scale_color_brewer(palette = "Set1") +
-        scale_x_discrete(breaks = seq(2006, 2014)) +
+        scale_x_continuous(breaks = seq(2006, 2014)) +
         scale_y_continuous(labels = pct0, breaks = seq(0, 100, 2)) +
         labs(x = "Year", y = "Percentage of GPR") +
         ggtitle(paste0(syst," Hospital System\nUncompensated Care as % of GPR")) +
